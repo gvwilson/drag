@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dataflow Diagram Library</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <div id="toolbar">
+            <div class="tool-item" id="box-type1-tool" title="Add Box (2 bumps top, 1 bump bottom)">
+                <div class="tool-icon-box-type1"></div>
+            </div>
+            <div class="tool-item" id="box-type2-tool" title="Add Box (1 bump top, 1 bump bottom)">
+                <div class="tool-icon-box-type2"></div>
+            </div>
+            <div class="tool-item" id="line-tool" title="Add Connection">
+                <div class="tool-icon-line"></div>
+            </div>
+            <button id="json-button">JSON</button>
+        </div>
+        <div id="canvas-container">
+            <canvas id="canvas"></canvas>
+        </div>
+    </div>
+
+    <div id="modal">
+        <div id="modal-content">
+            <h2>Diagram JSON</h2>
+            <div id="json-output"></div>
+            <button id="close-modal">Close</button>
+        </div>
+    </div>
+
+    <script src="diagram.js"></script>
+</body>
+</html>
