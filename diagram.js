@@ -19,12 +19,18 @@ class DataflowDiagram {
         
         this.SNAP_THRESHOLD = 20; // Distance threshold for snapping
         
+        this.contextMenu = null;
+        this.contextMenuTarget = null; // Can be a box or connection object
+        this.contextMenuType = null; // 'box' or 'line'
+        
         this.init();
     }
     
     init() {
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
+        
+        this.contextMenu = document.getElementById('context-menu');
         
         document.getElementById('box-type1-tool').addEventListener('click', () => this.selectTool('box', 1));
         document.getElementById('box-type2-tool').addEventListener('click', () => this.selectTool('box', 2));
@@ -35,6 +41,19 @@ class DataflowDiagram {
         this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
         this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         this.canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
+        this.canvas.addEventListener('contextmenu', (e) => this.handleContextMenu(e));
+        
+        // Close context menu when clicking elsewhere
+        document.addEventListener('click', (e) => {
+            if (!this.contextMenu.contains(e.target)) {
+                this.hideContextMenu();
+            }
+        });
+        
+        // Handle context menu item clicks
+        document.querySelectorAll('.context-menu-item').forEach(item => {
+            item.addEventListener('click', (e) => this.handleContextMenuAction(e));
+        });
         
         this.render();
     }
@@ -227,8 +246,24 @@ class DataflowDiagram {
         childBox.parentBox = parentBox;
         
         // Align child box below parent
+        const oldChildX = childBox.x;
         childBox.x = parentBox.x + (parentBox.width - childBox.width) / 2;
         childBox.y = parentBox.y + parentBox.height;
+        
+        // Calculate the horizontal offset that was applied to childBox
+        const deltaX = childBox.x - oldChildX;
+        
+        // Recursively update all descendants to maintain their relative positions
+        this.updateDescendants(childBox, deltaX);
+    }
+    
+    updateDescendants(box, deltaX) {
+        let current = box.childBox;
+        while (current) {
+            current.x += deltaX;
+            current.y = current.parentBox.y + current.parentBox.height;
+            current = current.childBox;
+        }
     }
     
     getStackContaining(box) {
@@ -479,6 +514,233 @@ class DataflowDiagram {
             this.ctx.textBaseline = 'middle';
             this.ctx.fillText(label, midX, midY);
         }
+    }
+    
+    
+    handleContextMenu(e) {
+        e.preventDefault();
+        
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        // Check if clicked on a line
+        const connection = this.getConnectionAt(x, y);
+        if (connection) {
+            this.showContextMenuForLine(connection, e.clientX, e.clientY);
+            return;
+        }
+        
+        // Check if clicked on a box
+        const box = this.getBoxAt(x, y);
+        if (box) {
+            this.showContextMenuForBox(box, e.clientX, e.clientY);
+            return;
+        }
+        
+        this.hideContextMenu();
+    }
+    
+    showContextMenuForLine(connection, x, y) {
+        this.contextMenuTarget = connection;
+        this.contextMenuType = 'line';
+        
+        // Show only "Delete" option
+        document.querySelectorAll('.context-menu-item').forEach(item => {
+            item.style.display = 'none';
+        });
+        document.querySelector('[data-action="delete"]').style.display = 'block';
+        document.querySelector('[data-action="delete"]').textContent = 'Delete line';
+        
+        this.contextMenu.style.left = x + 'px';
+        this.contextMenu.style.top = y + 'px';
+        this.contextMenu.style.display = 'block';
+    }
+    
+    showContextMenuForBox(box, x, y) {
+        this.contextMenuTarget = box;
+        this.contextMenuType = 'box';
+        
+        const stack = this.getStackContaining(box);
+        const isInStack = stack.length > 1;
+        
+        // Hide all items first
+        document.querySelectorAll('.context-menu-item').forEach(item => {
+            item.style.display = 'none';
+        });
+        
+        if (!isInStack) {
+            // Not in a stack - show simple delete
+            document.querySelector('[data-action="delete"]').style.display = 'block';
+            document.querySelector('[data-action="delete"]').textContent = 'Delete box';
+        } else {
+            // In a stack - show two options
+            document.querySelector('[data-action="delete-box"]').style.display = 'block';
+            document.querySelector('[data-action="delete-box-and-below"]').style.display = 'block';
+        }
+        
+        this.contextMenu.style.left = x + 'px';
+        this.contextMenu.style.top = y + 'px';
+        this.contextMenu.style.display = 'block';
+    }
+    
+    hideContextMenu() {
+        this.contextMenu.style.display = 'none';
+        this.contextMenuTarget = null;
+        this.contextMenuType = null;
+    }
+    
+    handleContextMenuAction(e) {
+        const action = e.target.getAttribute('data-action');
+        
+        if (this.contextMenuType === 'line' && action === 'delete') {
+            this.deleteLine(this.contextMenuTarget);
+        } else if (this.contextMenuType === 'box' && action === 'delete') {
+            this.deleteBox(this.contextMenuTarget, false);
+        } else if (this.contextMenuType === 'box' && action === 'delete-box') {
+            this.deleteBox(this.contextMenuTarget, false);
+        } else if (this.contextMenuType === 'box' && action === 'delete-box-and-below') {
+            this.deleteBox(this.contextMenuTarget, true);
+        }
+        
+        this.hideContextMenu();
+        this.render();
+    }
+    
+    deleteLine(connection) {
+        const index = this.connections.indexOf(connection);
+        if (index > -1) {
+            this.connections.splice(index, 1);
+        }
+    }
+    
+    deleteBox(box, deleteBelow) {
+        if (deleteBelow) {
+            // Delete this box and all boxes below it in the stack
+            const boxesToDelete = [box];
+            let current = box.childBox;
+            while (current) {
+                boxesToDelete.push(current);
+                current = current.childBox;
+            }
+            
+            // Disconnect from parent if exists
+            if (box.parentBox) {
+                box.parentBox.childBox = null;
+            }
+            
+            // Remove all boxes and their connections
+            boxesToDelete.forEach(b => {
+                // Remove box
+                const boxIndex = this.boxes.indexOf(b);
+                if (boxIndex > -1) {
+                    this.boxes.splice(boxIndex, 1);
+                }
+                
+                // Remove connections involving this box
+                this.connections = this.connections.filter(
+                    conn => conn.from !== b.id && conn.to !== b.id
+                );
+            });
+        } else {
+            // Delete only this box - reconnect parent and child if both exist
+            if (box.parentBox && box.childBox) {
+                // Box is in the middle - reconnect parent to child
+                box.parentBox.childBox = box.childBox;
+                box.childBox.parentBox = box.parentBox;
+                
+                // Reposition child to be directly under parent
+                box.childBox.x = box.parentBox.x + (box.parentBox.width - box.childBox.width) / 2;
+                box.childBox.y = box.parentBox.y + box.parentBox.height;
+                
+                // Update all descendants
+                const deltaX = box.childBox.x - box.x;
+                this.updateDescendants(box.childBox, deltaX);
+            } else {
+                // Box is at top or bottom of stack, or standalone
+                if (box.parentBox) {
+                    box.parentBox.childBox = null;
+                }
+                if (box.childBox) {
+                    box.childBox.parentBox = null;
+                }
+            }
+            
+            // Remove the box
+            const boxIndex = this.boxes.indexOf(box);
+            if (boxIndex > -1) {
+                this.boxes.splice(boxIndex, 1);
+            }
+            
+            // Remove connections involving this box
+            this.connections = this.connections.filter(
+                conn => conn.from !== box.id && conn.to !== box.id
+            );
+        }
+    }
+    
+    getConnectionAt(x, y) {
+        const threshold = 8; // Click tolerance in pixels
+        
+        for (let conn of this.connections) {
+            const fromBox = this.getBoxById(conn.from);
+            const toBox = this.getBoxById(conn.to);
+            
+            if (!fromBox || !toBox) continue;
+            
+            // Calculate centers
+            const fromCenterX = fromBox.x + fromBox.width / 2;
+            const fromCenterY = fromBox.y + fromBox.height / 2;
+            const toCenterX = toBox.x + toBox.width / 2;
+            const toCenterY = toBox.y + toBox.height / 2;
+            
+            // Get edge intersections
+            const startPoint = this.getBoxEdgeIntersection(fromBox, fromCenterX, fromCenterY, toCenterX, toCenterY);
+            const endPoint = this.getBoxEdgeIntersection(toBox, toCenterX, toCenterY, fromCenterX, fromCenterY);
+            
+            // Calculate distance from point to line segment
+            const dist = this.pointToLineDistance(x, y, startPoint.x, startPoint.y, endPoint.x, endPoint.y);
+            
+            if (dist < threshold) {
+                return conn;
+            }
+        }
+        
+        return null;
+    }
+    
+    pointToLineDistance(px, py, x1, y1, x2, y2) {
+        // Calculate distance from point (px, py) to line segment (x1,y1)-(x2,y2)
+        const A = px - x1;
+        const B = py - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+        
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        let param = -1;
+        
+        if (lenSq !== 0) {
+            param = dot / lenSq;
+        }
+        
+        let xx, yy;
+        
+        if (param < 0) {
+            xx = x1;
+            yy = y1;
+        } else if (param > 1) {
+            xx = x2;
+            yy = y2;
+        } else {
+            xx = x1 + param * C;
+            yy = y1 + param * D;
+        }
+        
+        const dx = px - xx;
+        const dy = py - yy;
+        
+        return Math.sqrt(dx * dx + dy * dy);
     }
     
     showJSON() {

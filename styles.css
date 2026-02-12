@@ -237,3 +237,24 @@ body {
 #close-modal:hover {
     background: #555;
 }
+
+#context-menu {
+    min-width: 180px;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.context-menu-item {
+    padding: 10px 15px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.context-menu-item:hover {
+    background: #f0f0f0;
+}
+
+.context-menu-item:active {
+    background: #e0e0e0;
+}
