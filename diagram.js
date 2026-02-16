@@ -16,6 +16,7 @@ class DataflowDiagram {
         this.dragOffset = { x: 0, y: 0 };
         this.connectionStart = null; // { box, bumpId }
         this.tempConnection = null;
+        this.draggingLineEnd = null; // { conn, end: 'from'|'to', mousePos }
 
         this.SNAP_THRESHOLD = 20;
         this.BUMP_RADIUS = 6;
@@ -172,9 +173,20 @@ class DataflowDiagram {
                 }
             }
         } else {
-            const box = this.getBoxAt(x, y);
-            if (box) {
-                this.startDragging(box, x, y);
+            // Check for line endpoint drag before box drag
+            const lineEnd = this.getLineEndAt(x, y);
+            if (lineEnd) {
+                this.draggingLineEnd = {
+                    conn: lineEnd.conn,
+                    end: lineEnd.end,
+                    mousePos: { x, y }
+                };
+                this.canvas.style.cursor = 'move';
+            } else {
+                const box = this.getBoxAt(x, y);
+                if (box) {
+                    this.startDragging(box, x, y);
+                }
             }
         }
     }
@@ -228,12 +240,20 @@ class DataflowDiagram {
             });
 
             this.render();
+        } else if (this.draggingLineEnd) {
+            this.draggingLineEnd.mousePos = { x, y };
+            this.render();
         } else if (this.connectionStart && this.tempConnection) {
             this.tempConnection = { x, y };
             this.render();
         } else if (!this.currentTool) {
-            const box = this.getBoxAt(x, y);
-            this.canvas.style.cursor = box ? 'move' : 'default';
+            const lineEnd = this.getLineEndAt(x, y);
+            if (lineEnd) {
+                this.canvas.style.cursor = 'pointer';
+            } else {
+                const box = this.getBoxAt(x, y);
+                this.canvas.style.cursor = box ? 'move' : 'default';
+            }
         }
     }
 
@@ -247,6 +267,29 @@ class DataflowDiagram {
 
             this.isDragging = false;
             this.draggedStack = null;
+            this.canvas.style.cursor = 'default';
+            this.render();
+        } else if (this.draggingLineEnd) {
+            const { conn, end } = this.draggingLineEnd;
+            const endBox = this.getBoxAt(x, y, this.BUMP_RADIUS);
+
+            if (endBox) {
+                const otherBoxId = end === 'from' ? conn.to : conn.from;
+                if (endBox.id !== otherBoxId) {
+                    const bump = this.getNearestAvailableBump(endBox, x, y);
+                    if (bump) {
+                        if (end === 'from') {
+                            conn.from = endBox.id;
+                            conn.fromBump = bump.id;
+                        } else {
+                            conn.to = endBox.id;
+                            conn.toBump = bump.id;
+                        }
+                    }
+                }
+            }
+
+            this.draggingLineEnd = null;
             this.canvas.style.cursor = 'default';
             this.render();
         } else if (this.connectionStart) {
@@ -411,7 +454,22 @@ class DataflowDiagram {
             const fromBox = this.getBoxById(conn.from);
             const toBox = this.getBoxById(conn.to);
             if (fromBox && toBox) {
-                this.drawConnection(conn, fromBox, toBox);
+                if (this.draggingLineEnd && this.draggingLineEnd.conn === conn) {
+                    const { end, mousePos } = this.draggingLineEnd;
+                    if (end === 'from') {
+                        const toPos = this.getBumpTipPosition(toBox, conn.toBump);
+                        if (toPos) {
+                            this.drawLine(mousePos.x, mousePos.y, toPos.x, toPos.y, conn.id, false);
+                        }
+                    } else {
+                        const fromPos = this.getBumpTipPosition(fromBox, conn.fromBump);
+                        if (fromPos) {
+                            this.drawLine(fromPos.x, fromPos.y, mousePos.x, mousePos.y, conn.id, false);
+                        }
+                    }
+                } else {
+                    this.drawConnection(conn, fromBox, toBox);
+                }
             }
         });
 
@@ -693,6 +751,32 @@ class DataflowDiagram {
     }
 
     // --- Hit testing ---
+
+    getLineEndAt(x, y) {
+        const threshold = 12;
+
+        for (let conn of this.connections) {
+            const fromBox = this.getBoxById(conn.from);
+            const toBox = this.getBoxById(conn.to);
+            if (!fromBox || !toBox) continue;
+
+            const fromPos = this.getBumpTipPosition(fromBox, conn.fromBump);
+            const toPos = this.getBumpTipPosition(toBox, conn.toBump);
+            if (!fromPos || !toPos) continue;
+
+            const fromDist = Math.sqrt((x - fromPos.x) ** 2 + (y - fromPos.y) ** 2);
+            if (fromDist < threshold) {
+                return { conn, end: 'from' };
+            }
+
+            const toDist = Math.sqrt((x - toPos.x) ** 2 + (y - toPos.y) ** 2);
+            if (toDist < threshold) {
+                return { conn, end: 'to' };
+            }
+        }
+
+        return null;
+    }
 
     getConnectionAt(x, y) {
         const threshold = 8;
